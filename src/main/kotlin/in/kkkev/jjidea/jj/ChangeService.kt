@@ -143,7 +143,9 @@ object ChangeService {
             }
 
             FileChangeStatus.CONFLICT -> {
-                log.debug("Skipping conflicted file (conflict resolution handled via MergeProvider): ${fileChange.filePath}")
+                log.debug(
+                    "Skipping conflicted file (conflict resolution handled via MergeProvider): ${fileChange.filePath}"
+                )
                 null
             }
             FileChangeStatus.RENAMED, FileChangeStatus.UNKNOWN -> {
