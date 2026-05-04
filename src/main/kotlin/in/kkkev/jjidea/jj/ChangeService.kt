@@ -142,6 +142,10 @@ object ChangeService {
                 Change(beforeRevision, null, FileStatus.DELETED)
             }
 
+            FileChangeStatus.CONFLICT -> {
+                log.debug("Skipping conflicted file (conflict resolution handled via MergeProvider): ${fileChange.filePath}")
+                null
+            }
             FileChangeStatus.RENAMED, FileChangeStatus.UNKNOWN -> {
                 log.debug("Skipping file with unknown status: ${fileChange.filePath}")
                 null

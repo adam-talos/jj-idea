@@ -11,5 +11,6 @@ enum class FileChangeStatus {
     ADDED,
     DELETED,
     RENAMED,
+    CONFLICT,
     UNKNOWN
 }
