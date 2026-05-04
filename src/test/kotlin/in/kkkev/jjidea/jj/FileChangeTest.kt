@@ -72,6 +72,7 @@ class FileChangeTest {
                 FileChangeStatus.ADDED,
                 FileChangeStatus.DELETED,
                 FileChangeStatus.RENAMED,
+                FileChangeStatus.CONFLICT,
                 FileChangeStatus.UNKNOWN
             )
     }
@@ -82,6 +83,7 @@ class FileChangeTest {
         FileChangeStatus.valueOf("ADDED") shouldBe FileChangeStatus.ADDED
         FileChangeStatus.valueOf("DELETED") shouldBe FileChangeStatus.DELETED
         FileChangeStatus.valueOf("RENAMED") shouldBe FileChangeStatus.RENAMED
+        FileChangeStatus.valueOf("CONFLICT") shouldBe FileChangeStatus.CONFLICT
         FileChangeStatus.valueOf("UNKNOWN") shouldBe FileChangeStatus.UNKNOWN
     }
 
