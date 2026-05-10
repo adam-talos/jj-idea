@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- "Compare with commit" popup now shows bookmarks immediately when opened, instead of showing nothing until the entire log history loaded. Bookmarks load first (fast path), then recent changes are fetched in a second phase limited to 200 entries to avoid stalling on large repositories.
+
 ## [0.6.6] - 2026-04-19
 
 ### Added
