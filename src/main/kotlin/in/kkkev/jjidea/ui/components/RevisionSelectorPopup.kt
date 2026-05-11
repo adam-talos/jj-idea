@@ -176,7 +176,9 @@ object RevisionSelectorPopup {
         }
 
         private var currentPopup: JBPopup? = null
+
         @Volatile private var allItems: List<CompareItem> = emptyList()
+
         @Volatile private var dataLoaded = false
 
         init {
@@ -237,8 +239,14 @@ object RevisionSelectorPopup {
                                 val selected = list.selectedValue
                                 val text = searchField.text.trim()
                                 when {
-                                    selected != null -> { selectItem(selected); e.consume() }
-                                    text.isNotEmpty() -> { selectRevisionExpression(text); e.consume() }
+                                    selected != null -> {
+                                        selectItem(selected)
+                                        e.consume()
+                                    }
+                                    text.isNotEmpty() -> {
+                                        selectRevisionExpression(text)
+                                        e.consume()
+                                    }
                                 }
                             }
                         }

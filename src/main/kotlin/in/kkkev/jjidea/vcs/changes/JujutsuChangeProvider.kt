@@ -39,9 +39,14 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
 
                     val conflictedPaths = if (workingCopyInConflict(result.stdout)) {
                         val resolveResult = repo.commandExecutor.resolveList()
-                        if (resolveResult.isSuccess) parseConflictPaths(resolveResult.stdout)
-                        else collectConflictPathsFromStatus(result.stdout)
-                    } else emptySet()
+                        if (resolveResult.isSuccess) {
+                            parseConflictPaths(resolveResult.stdout)
+                        } else {
+                            collectConflictPathsFromStatus(result.stdout)
+                        }
+                    } else {
+                        emptySet()
+                    }
 
                     parseStatus(result.stdout, repo, builder, conflictedPaths)
                 } catch (e: ProcessCanceledException) {
@@ -71,7 +76,14 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
         output: String,
         repo: JujutsuRepository,
         builder: ChangelistBuilder,
-        conflictedPaths: Set<String> = if (workingCopyInConflict(output)) collectConflictPathsFromStatus(output) else emptySet()
+        conflictedPaths: Set<String> = if (workingCopyInConflict(
+                output
+            )
+        ) {
+            collectConflictPathsFromStatus(output)
+        } else {
+            emptySet()
+        }
     ) {
         val lines = output.lines()
         val addedConflictPaths = mutableSetOf<String>()
@@ -202,16 +214,6 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
     private fun addConflictedChange(path: FilePath, repo: JujutsuRepository, builder: ChangelistBuilder) {
         val beforeRevision = repo.createRevision(path, repo.workingCopyParent())
         val afterRevision = CurrentContentRevision(path)
-        builder.processChange(
-            Change(beforeRevision, afterRevision, FileStatus.MERGED_WITH_CONFLICTS),
-            vcs.keyInstanceMethod
-        )
-    }
-
-    private fun addConflictedChange(path: FilePath, repo: JujutsuRepository, builder: ChangelistBuilder) {
-        val beforeRevision = repo.createRevision(path, repo.workingCopyParent())
-        val afterRevision = CurrentContentRevision(path)
-
         builder.processChange(
             Change(beforeRevision, afterRevision, FileStatus.MERGED_WITH_CONFLICTS),
             vcs.keyInstanceMethod
