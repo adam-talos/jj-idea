@@ -1,5 +1,7 @@
 package `in`.kkkev.jjidea.jj
 
+import `in`.kkkev.jjidea.JujutsuBundle
+
 sealed interface Revset {
     /** Omit `-r` flag entirely, letting jj use its `revsets.log` config. */
     data object Default : Revset
@@ -70,9 +72,45 @@ value class RevisionExpression(val value: String) : Revision {
     override fun toString() = value
 }
 
-// TODO Find other references to @
-object WorkingCopy : Ref {
-    override fun toString() = "@"
+object WorkingCopy : Ref, ContentLocator {
+    override fun toString() = REF
+    override val title = JujutsuBundle.message("diff.label.current")
+    override val full = REF
+    override val short = REF
+
+    const val REF = "@"
+}
+
+/**
+ * Identifier that can be used to identify content within the repository. Includes individual revisions and locators
+ * from which content can be constructed.
+ */
+sealed interface ContentLocator : Shortenable {
+    /**
+     * Title to give to editors etc. that display content behind this locator.
+     */
+    val title: String
+
+    object Empty : ContentLocator {
+        override val title = JujutsuBundle.message("diff.label.empty")
+        override val full = ""
+        override val short = ""
+    }
+}
+
+/**
+ * Signals that content should be obtained by reverse-applying `jj diff --git -r [childRevision]`
+ * to the file content at [childRevision], reconstructing the auto-merged parent tree content.
+ *
+ * Used when [childRevision] is a merge commit (working copy or historical), where
+ * `jj file show -r <firstParent>` would give only the first parent's content rather than
+ * the auto-merged tree that jj actually diffs against.
+ */
+data class MergeParentOf(val childRevision: Revision) : ContentLocator {
+    override fun toString() = "MergeParent($childRevision)"
+    override val title get() = JujutsuBundle.message("diff.label.merged.parents", childRevision.short)
+    override val full get() = title
+    override val short = title
 }
 
 data class RefAtCommit(val commitId: CommitId, val ref: Ref)

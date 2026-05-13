@@ -107,7 +107,7 @@ abstract class StyledTextCanvas : TextCanvas {
 
 fun TextCanvas.append(message: JujutsuMessage) = append(JujutsuBundle.message(message.key))
 
-fun TextCanvas.append(shortenable: Shortenable) {
+fun TextCanvas.append(shortenable: ShortenableImpl) {
     bold { append(shortenable.short) }
     shortenable.displayRemainder.takeIf { it.isNotEmpty() }?.let { remainder -> smaller { grey { append(remainder) } } }
 }
@@ -210,6 +210,19 @@ fun TextCanvas.append(
         }
         append(suffix)
     }
+}
+
+fun TextCanvas.appendChangeTooltip(detail: ChangeDetail) {
+    append(detail.id)
+    append(" (")
+    append(detail.commitId)
+    append(")\n")
+    detail.author?.let { append(it) }
+    detail.authorTimestamp?.let { ts ->
+        if (detail.author != null) append(" \u00b7 ")
+        append(DateTimeFormatter.formatAbsolute(ts))
+    }
+    control("<pre style='white-space: pre-wrap;'>") { appendSummary(detail.description) }
 }
 
 fun TextCanvas.appendSummary(entry: LogEntry) {

@@ -169,7 +169,10 @@ class CliExecutor(
 
     override fun diff(filePath: String) = execute(root, listOf("diff", filePath))
 
-    override fun diffSummary(revision: Revision) = execute(root, listOf("diff", "--summary", "-r", revision))
+    override fun diffSummary(revision: Revision, filePath: FilePath?) = execute(
+        root,
+        listOfNotNull("diff", "--summary", "-r", revision, filePath?.relativeTo(root!!))
+    )
 
     override fun show(filePath: FilePath, revision: Revision) =
         execute(root, listOf("file", "show", "-r", revision, filePath.relativeTo(root!!)))
@@ -288,6 +291,9 @@ class CliExecutor(
     override fun diffGit(revision: Revision): CommandExecutor.CommandResult =
         execute(root, listOf("diff", "--git", "-r", revision))
 
+    override fun diffGitFile(revision: Revision, filePath: FilePath): CommandExecutor.CommandResult =
+        execute(root, listOf("diff", "--git", "-r", revision, "--", filePath.relativeTo(root!!)))
+
     override fun restore(filePaths: List<FilePath>, revision: Revision): CommandExecutor.CommandResult =
         execute(root, listOf("restore", "-f", revision) + filePaths.map { it.relativeTo(root!!) })
 
@@ -326,11 +332,14 @@ class CliExecutor(
 
     override fun gitRemoteList() = execute(root, listOf("git", "remote", "list"))
 
-    override fun latestPushedAncestorCommitId(remoteName: String): String? {
-        val revset = Expression("latest(ancestors(@) & ancestors(remote_bookmarks(remote=$remoteName)))")
+    override fun latestPushedAncestorCommitId(revision: Revision, remoteName: String): String? {
+        val revset = Expression("latest(ancestors($revision) & ancestors(remote_bookmarks(remote=$remoteName)))")
         val result = log(revset, template = "commit_id", limit = 1)
         return result.stdout.trim().takeIf { result.isSuccess && it.isNotEmpty() }
     }
+
+    override fun latestPushedAncestorCommitId(remoteName: String) =
+        latestPushedAncestorCommitId(WorkingCopy, remoteName)
 
     override fun gitClone(source: String, destination: String, colocate: Boolean) =
         execute(null, gitCloneArgs(source, destination, colocate), timeout = networkTimeout)

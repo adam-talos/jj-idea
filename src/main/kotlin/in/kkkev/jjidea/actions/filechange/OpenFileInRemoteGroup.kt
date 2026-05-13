@@ -8,7 +8,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.DumbAwareAction
 import `in`.kkkev.jjidea.JujutsuBundle
 import `in`.kkkev.jjidea.actions.changes
-import `in`.kkkev.jjidea.actions.git.RecognizedRemote
+import `in`.kkkev.jjidea.actions.git.ClassifiedRemote
 import `in`.kkkev.jjidea.actions.git.RemoteUrlBuilder
 import `in`.kkkev.jjidea.actions.git.applyRemoteVisibility
 import `in`.kkkev.jjidea.actions.logEntry
@@ -22,52 +22,52 @@ import `in`.kkkev.jjidea.jj.LogEntry
  * - 2+ recognized remotes → "Open File on Remote" submenu
  *
  * Hidden in working copy context or when no single file with afterRevision is selected.
- * Uses [LogEntry.immutable] as a heuristic for whether the commit is pushed.
+ * For non-pushed commits, resolves the nearest pushed ancestor per remote so the URL is valid.
  */
 class OpenFileInRemoteGroup : DefaultActionGroup() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
 
-    private fun remotes(entry: LogEntry) =
-        RemoteUrlBuilder.recognizedRemotes(entry.repo.gitRemotes, entry.commitId.full, entry.immutable)
+    private fun classifiedRemotes(entry: LogEntry) =
+        RemoteUrlBuilder.classifiedRemotes(entry.repo.gitRemotes)
 
     override fun update(e: AnActionEvent) {
         val entry = e.logEntry
-        if (entry == null ||
-            entry.isWorkingCopy ||
-            e.changes.size != 1 ||
-            e.changes.first().afterRevision == null
-        ) {
+        if (entry == null || entry.isWorkingCopy || !entry.hasPushedAncestor || e.changes.none { it.after != null }) {
             e.presentation.isVisible = false
             return
         }
-        applyRemoteVisibility(e, remotes(entry).size, JujutsuBundle.message("action.open.file.in.remote"))
+        applyRemoteVisibility(e, classifiedRemotes(entry).size, JujutsuBundle.message("action.open.file.in.remote"))
     }
 
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val entry = e?.logEntry ?: return emptyArray()
-        val change = e.changes.firstOrNull() ?: return emptyArray()
-        val filePath = change.afterRevision?.file ?: return emptyArray()
-        val relativePath = entry.repo.getRelativePath(filePath)
-        val commitHash = entry.commitId.full
-        return remotes(entry).map { remote ->
-            fileChangeRemoteAction(remote, commitHash, relativePath)
+        val changes = e.changes.takeUnless { it.isEmpty() } ?: return emptyArray()
+        val filePaths = changes.mapNotNull { it.after?.filePath }.takeUnless { it.isEmpty() } ?: return emptyArray()
+        val relativePaths = filePaths.map { filePath -> entry.repo.getRelativePath(filePath) }
+        return classifiedRemotes(entry).mapNotNull { remote ->
+            val commitHash = resolveCommitHash(entry, remote) ?: return@mapNotNull null
+            fileChangeRemoteAction(remote, commitHash, relativePaths)
         }.toTypedArray()
     }
+
+    private fun resolveCommitHash(entry: LogEntry, remote: ClassifiedRemote): String? =
+        if (entry.immutable) {
+            entry.commitId.full
+        } else {
+            entry.repo.commandExecutor.latestPushedAncestorCommitId(entry.id, remote.name)
+        }
 }
 
 private fun fileChangeRemoteAction(
-    remote: RecognizedRemote,
+    remote: ClassifiedRemote,
     commitHash: String,
-    relativePath: String
+    relativePaths: List<String>
 ) = object : DumbAwareAction(
     JujutsuBundle.message("log.action.open.file.in.remote.named", remote.kind.label, remote.name),
-    if (remote.isPushed) {
-        JujutsuBundle.message("log.action.open.file.in.remote.tooltip", remote.kind.label)
-    } else {
-        JujutsuBundle.message("log.action.open.file.in.remote.not.pushed.tooltip", remote.kind.label)
-    },
+    JujutsuBundle.message("log.action.open.file.in.remote.tooltip", remote.kind.label),
     remote.kind.icon
 ) {
-    override fun actionPerformed(e: AnActionEvent) =
+    override fun actionPerformed(e: AnActionEvent) = relativePaths.forEach { relativePath ->
         BrowserUtil.browse(RemoteUrlBuilder.fileUrl(remote.base, remote.kind, commitHash, relativePath))
+    }
 }

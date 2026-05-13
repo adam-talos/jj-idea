@@ -46,7 +46,7 @@ interface CommandExecutor {
      * @param revision Revision (e.g., "@", "@-", commit hash)
      * @return Summary of file changes
      */
-    fun diffSummary(revision: Revision): CommandResult
+    fun diffSummary(revision: Revision, filePath: FilePath? = null): CommandResult
 
     /**
      * Get the content of a file at a specific revision
@@ -161,6 +161,15 @@ interface CommandExecutor {
     fun diffGit(revision: Revision): CommandResult
 
     /**
+     * Get git-format diff for a single file at a specific revision.
+     * Used for reverse-applying to reconstruct merge parent content.
+     * @param revision Revision to diff (e.g., "@", change ID)
+     * @param filePath File to diff
+     * @return Git-format diff output for the specific file
+     */
+    fun diffGitFile(revision: Revision, filePath: FilePath): CommandResult
+
+    /**
      * Restore the specified files to the specified revision.
      */
     fun restore(filePaths: List<FilePath>, revision: Revision): CommandResult
@@ -242,6 +251,14 @@ interface CommandExecutor {
      * @return Command result with remote names (one per line)
      */
     fun gitRemoteList(): CommandResult
+
+    /**
+     * Find the most recent ancestor of [revision] that has been pushed to [remoteName].
+     * Returns the full commit hash, or null if no pushed ancestor is found.
+     * @param revision Revision to search ancestors of
+     * @param remoteName Remote name (e.g. "origin")
+     */
+    fun latestPushedAncestorCommitId(revision: Revision, remoteName: String): String?
 
     /**
      * Find the most recent ancestor of the working copy that has been pushed to [remoteName].

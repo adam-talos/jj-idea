@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Splitter
+import com.intellij.openapi.vcs.VcsDataKeys
 import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.changes.ChangeListListener
 import com.intellij.openapi.vcs.changes.ChangeListManager
@@ -48,7 +49,7 @@ import javax.swing.tree.TreePath
  * The dropdown selector is the authoritative way to choose which repo's
  * working copy to edit. The tree is purely for viewing and navigating changes.
  */
-class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
+class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayout()), Disposable, UiDataProvider {
     companion object {
         private const val COLLAPSED_PATHS_KEY_PREFIX = "JujutsuToolWindow.CollapsedPaths"
     }
@@ -85,12 +86,7 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
         }
 
         // Handle dropdown selection
-        controlsPanel.onRepositorySelected = { repo ->
-            controlsPanel.boundRepository = repo
-            project.stateModel.repositoryStates.value.find { it.repo == repo }?.let {
-                controlsPanel.update(it)
-            }
-        }
+        controlsPanel.onRepositorySelected = { controlsPanel.boundRepository = it }
 
         createUI()
         setupTreeInteractions()
@@ -193,7 +189,7 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
 
     private fun subscribeToStateModel() {
         // repositoryStates fires on EDT already (via invokeLater in SimpleNotifiableState)
-        project.stateModel.repositoryStates.connect(this) { new ->
+        project.stateModel.workingCopies.connect(this) { new ->
             // Only update repo state if jj is available
             val status = JjAvailabilityChecker.getInstance(project).status.value
             if (status !is JjAvailabilityStatus.Available) return@connect
@@ -205,31 +201,22 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
 
             if (hasRepos) {
                 // Update the dropdown with available repos
-                val sortedRepos = new.map { it.repo }.sortedBy { it.displayName }
+                val sortedRepos = new.map { it.value.repo }.sortedBy { it.displayName }
                 controlsPanel.updateAvailableRepositories(sortedRepos)
 
                 // Update controls if the current repo was updated
                 val currentRepo = controlsPanel.boundRepository
-                new.find { it.repo == currentRepo }?.let { entry ->
-                    controlsPanel.update(entry)
-                }
+                currentRepo?.let { repo -> controlsPanel.update(repo.workingCopy) }
 
                 // If no repo is bound, select the first one
-                if (currentRepo == null || new.none { it.repo == currentRepo }) {
-                    controlsPanel.boundRepository = new.firstOrNull()?.repo
-                    new.firstOrNull()?.let { controlsPanel.update(it) }
+                if (currentRepo == null || new.none { it.value.repo == currentRepo }) {
+                    sortedRepos.firstOrNull()?.let { controlsPanel.boundRepository = it }
                 }
             }
         }
 
         // Subscribe to change selection for programmatic repo selection
-        project.stateModel.changeSelection.connect(this) { key ->
-            controlsPanel.boundRepository = key.repo
-            // Also update from state model
-            project.stateModel.repositoryStates.value.find { it.repo == key.repo }?.let {
-                controlsPanel.update(it)
-            }
-        }
+        project.stateModel.changeSelection.connect(this) { controlsPanel.boundRepository = it.repo }
     }
 
     private fun subscribeToAvailabilityStatus() {
@@ -254,7 +241,7 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
 
             is JjAvailabilityStatus.Available -> {
                 // Let state model handler decide between "content" and "empty"
-                val hasRepos = project.stateModel.repositoryStates.value.isNotEmpty()
+                val hasRepos = project.stateModel.workingCopies.value.isNotEmpty()
                 cardLayout.show(cardPanel, if (hasRepos) "content" else "empty")
             }
 
@@ -328,6 +315,10 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
         changesTree.installHandlers()
     }
 
+    override fun uiDataSnapshot(sink: DataSink) {
+        sink[VcsDataKeys.CHANGES] = changesTree.selectedChanges.toTypedArray()
+    }
+
     private fun getSelectedChange() = changesTree.selectedChanges.firstOrNull()
 
     /**
@@ -350,8 +341,8 @@ class UnifiedWorkingCopyPanel(private val project: Project) : JPanel(BorderLayou
             repos.forEach { dir -> dirtyScopeManager.dirDirtyRecursively(dir) }
         }
 
-        // Invalidate repositoryStates to reload descriptions and change IDs
-        project.stateModel.repositoryStates.invalidate()
+        // Invalidate working copies to reload descriptions and change IDs
+        project.stateModel.workingCopies.invalidate()
 
         // Also reload changes directly - the listener chain may be slow or not fire
         reloadChangesFromCache()

@@ -11,24 +11,37 @@ import kotlinx.datetime.Instant
 data class LogEntry(
     val repo: JujutsuRepository,
     override val id: ChangeId,
-    val commitId: CommitId,
+    override val commitId: CommitId,
     private val underlyingDescription: String,
     val bookmarks: List<Bookmark> = emptyList(),
     val parentIdentifiers: List<Identifiers> = emptyList(),
     override val isWorkingCopy: Boolean = false,
     override val hasConflict: Boolean = false,
     override val isEmpty: Boolean = false,
-    val authorTimestamp: Instant? = null,
+    override val authorTimestamp: Instant? = null,
     val committerTimestamp: Instant? = null,
-    val author: VcsUser? = null,
+    override val author: VcsUser? = null,
     val committer: VcsUser? = null,
-    override val immutable: Boolean = false
-) : GraphableEntry, ChangeStatus {
-    val description = Description(underlyingDescription)
+    override val immutable: Boolean = false,
+    val hasPushedAncestor: Boolean = false
+) : GraphableEntry, ChangeStatus, ChangeDetail {
+    override val description = Description(underlyingDescription)
 
     override val parentIds: List<ChangeId> get() = parentIdentifiers.map { it.changeId }
 
     val isDivergent get() = id.divergent
+
+    /**
+     * Returns the content locator to use as "before" content for a log entry's parent.
+     * For merge commits (multiple parents), returns [MergeParentOf] so that content is
+     * reconstructed via reverse-apply of the entry's diff rather than using first-parent content.
+     */
+    val parentContentLocator
+        get() = when (parentIds.size) {
+            1 -> parentIds.first()
+            0 -> ContentLocator.Empty
+            else -> MergeParentOf(id)
+        }
 
     /**
      * Projection of LogEntry that excludes volatile fields (timestamps) from equality.

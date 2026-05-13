@@ -196,7 +196,7 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
     }
 
     private fun addModifiedChange(path: FilePath, repo: JujutsuRepository, builder: ChangelistBuilder) {
-        val beforeRevision = repo.createRevision(path, repo.workingCopyParent())
+        val beforeRevision = repo.createContentRevision(path, repo.workingCopy.parentContentLocator)
         val afterRevision = CurrentContentRevision(path)
         builder.processChange(Change(beforeRevision, afterRevision, FileStatus.MODIFIED), vcs.keyInstanceMethod)
     }
@@ -207,12 +207,12 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
     }
 
     private fun addDeletedChange(path: FilePath, repo: JujutsuRepository, builder: ChangelistBuilder) {
-        val beforeRevision = repo.createRevision(path, repo.workingCopyParent())
+        val beforeRevision = repo.createContentRevision(path, repo.workingCopy.parentContentLocator)
         builder.processChange(Change(beforeRevision, null, FileStatus.DELETED), vcs.keyInstanceMethod)
     }
 
     private fun addConflictedChange(path: FilePath, repo: JujutsuRepository, builder: ChangelistBuilder) {
-        val beforeRevision = repo.createRevision(path, repo.workingCopyParent())
+        val beforeRevision = repo.createContentRevision(path, repo.workingCopy.parentContentLocator)
         val afterRevision = CurrentContentRevision(path)
         builder.processChange(
             Change(beforeRevision, afterRevision, FileStatus.MERGED_WITH_CONFLICTS),
@@ -239,7 +239,7 @@ class JujutsuChangeProvider(private val vcs: JujutsuVcs) : ChangeProvider {
         val beforePath = repo.directory.getChildPath(oldPath)
         val afterPath = repo.directory.getChildPath(newPath)
 
-        val beforeRevision = repo.createRevision(beforePath, repo.workingCopyParent())
+        val beforeRevision = repo.createContentRevision(beforePath, repo.workingCopy.parentContentLocator)
         val afterRevision = CurrentContentRevision(afterPath)
 
         val change = Change(beforeRevision, afterRevision, FileStatus.MODIFIED)

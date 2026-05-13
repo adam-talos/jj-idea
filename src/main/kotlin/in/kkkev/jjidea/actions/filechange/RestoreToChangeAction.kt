@@ -6,21 +6,25 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vfs.VfsUtil
 import `in`.kkkev.jjidea.JujutsuBundle
 import `in`.kkkev.jjidea.actions.changes
-import `in`.kkkev.jjidea.actions.logEntry
+import `in`.kkkev.jjidea.actions.file
+import `in`.kkkev.jjidea.actions.filePaths
+import `in`.kkkev.jjidea.actions.logEntryForFile
 import `in`.kkkev.jjidea.jj.invalidate
+import `in`.kkkev.jjidea.vcs.filePath
 
 /**
  * Restores selected file(s) to their state in a historical revision.
  * Uses [in.kkkev.jjidea.actions.JujutsuDataKeys.LOG_ENTRY] to determine the revision.
  *
- * This action is for our custom log panels where we have a LogEntry context.
+ * Works in both changes tree context (LOG_ENTRY DataSink) and editor context (file user data).
  *
  * Hidden when:
- * - No LOG_ENTRY is present (working copy context)
- * - LOG_ENTRY.isWorkingCopy is true (use RestoreSelectionAction instead)
+ * - No log entry resolvable (working copy editor context)
+ * - Log entry isWorkingCopy is true (use RestoreSelectionAction instead)
  */
 class RestoreToChangeAction : DumbAwareAction(
     JujutsuBundle.message("action.restore.to.revision"),
@@ -33,41 +37,58 @@ class RestoreToChangeAction : DumbAwareAction(
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val entry = e.logEntry ?: return
-        val change = e.changes.firstOrNull() ?: return
+        val entry = e.logEntryForFile ?: return
+        val filePaths = (e.filePaths.takeUnless { it.isEmpty() } ?: e.file?.let { listOf(it.filePath) }) ?: return
 
-        val filePath = change.afterRevision?.file ?: change.beforeRevision?.file ?: return
-        val fileName = filePath.name
+        val fileNames = filePaths.joinToString { it.name }
         val changeId = entry.id
         val repo = entry.repo
 
         // Show confirmation dialog
-        val title = JujutsuBundle.message("action.restore.to.revision.confirm.title", fileName, changeId.short)
-        val message = JujutsuBundle.message("action.restore.to.revision.confirm.message", changeId.short)
+        val (title, message) = if (filePaths.size == 1) {
+            JujutsuBundle.message(
+                "action.restore.to.revision.confirm.title",
+                fileNames.first(),
+                changeId.short
+            ) to JujutsuBundle.message(
+                "action.restore.to.revision.confirm.message",
+                changeId.short
+            )
+        } else {
+            JujutsuBundle.message(
+                "action.restore.to.revision.confirm.title.multiple",
+                filePaths.size,
+                changeId.short
+            ) to JujutsuBundle.message(
+                "action.restore.to.revision.confirm.message.multiple",
+                filePaths.size,
+                changeId.short
+            )
+        }
         if (Messages.showYesNoDialog(project, message, title, Messages.getWarningIcon()) != Messages.YES) {
             return
         }
 
         repo.commandExecutor.createCommand {
-            restore(listOf(filePath), changeId)
+            restore(filePaths, changeId)
         }
             .onSuccess {
-                filePath.virtualFile?.let { vf ->
-                    VfsUtil.markDirtyAndRefresh(false, false, true, vf)
-                }
+                val files = filePaths.map(FilePath::getVirtualFile)
+                VfsUtil.markDirtyAndRefresh(false, false, true, *files.toTypedArray())
                 repo.invalidate()
-                log.info("Restored $fileName to revision ${changeId.short}")
+                log.info("Restored $fileNames to revision ${changeId.short}")
             }
             .onFailure { tellUser(project, "action.restore.to.revision.error") }
             .executeAsync()
     }
 
     override fun update(e: AnActionEvent) {
-        val entry = e.logEntry
-        val hasChange = e.changes.isNotEmpty()
+        val entry = e.logEntryForFile
+        // Changes tree: has changes; editor context: has a file
+        val hasContent = e.changes.isNotEmpty() || e.file != null
 
-        // Hide when no entry, entry is working copy, or no change selected
-        val visible = entry != null && !entry.isWorkingCopy && hasChange
+        // Hide when no entry, entry is working copy, or no file content to act on
+        val visible = entry != null && !entry.isWorkingCopy && hasContent
         e.presentation.isEnabledAndVisible = e.project != null && visible
     }
 }

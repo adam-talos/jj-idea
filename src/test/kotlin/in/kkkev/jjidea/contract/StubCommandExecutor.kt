@@ -39,8 +39,17 @@ class StubCommandExecutor(private val stub: JjStub) : CommandExecutor {
         )
     )
 
-    override fun diffSummary(revision: Revision) =
-        toResult(stub.run("diff", "--summary", "-r", revision.toString()))
+    override fun diffSummary(revision: Revision, filePath: FilePath?) = toResult(
+        stub.run(
+            *listOfNotNull(
+                "diff",
+                "--summary",
+                "-r",
+                revision.toString(),
+                filePath?.path
+            ).toTypedArray()
+        )
+    )
 
     override fun bookmarkList(template: String?, remote: Remote?, tracked: Boolean, revision: Revision?) = toResult(
         stub.run(
@@ -146,6 +155,9 @@ class StubCommandExecutor(private val stub: JjStub) : CommandExecutor {
     override fun diffGit(revision: Revision): CommandExecutor.CommandResult =
         TODO("Not needed for integration tests")
 
+    override fun diffGitFile(revision: Revision, filePath: FilePath): CommandExecutor.CommandResult =
+        TODO("Not needed for integration tests")
+
     override fun restore(
         filePaths: List<FilePath>,
         revision: Revision
@@ -190,6 +202,9 @@ class StubCommandExecutor(private val stub: JjStub) : CommandExecutor {
     ): CommandExecutor.CommandResult = TODO("Not needed for integration tests")
 
     override fun gitRemoteList(): CommandExecutor.CommandResult =
+        TODO("Not needed for integration tests")
+
+    override fun latestPushedAncestorCommitId(revision: Revision, remoteName: String): String? =
         TODO("Not needed for integration tests")
 
     override fun latestPushedAncestorCommitId(remoteName: String): String? =

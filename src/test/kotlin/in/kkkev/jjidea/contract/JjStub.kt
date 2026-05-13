@@ -109,7 +109,12 @@ class JjStub(override val workDir: Path) : JjBackend {
     private fun cmdGitInit(): JjBackend.Result {
         workDir.resolve(".jj").createDirectories()
         // Root commit (immutable, empty)
-        val rootChange = newStubChange(description = "", parentIds = emptyList(), immutable = true)
+        val rootChange = newStubChange(
+            description = "",
+            parentIds = emptyList(),
+            immutable = true,
+            hasPushedAncestor = true
+        )
         changes.add(rootChange)
         // Working copy on top of root
         val wc = newStubChange(description = "", parentIds = listOf(rootChange.commitId))
@@ -153,10 +158,11 @@ class JjStub(override val workDir: Path) : JjBackend {
         val revset = args.flagValue("-r") ?: "@"
         val isGit = "--git" in args
         val isSummary = "--summary" in args
+        val file = args.withoutFlags.getOrNull(1)
         if (isGit) return cmdDiffGit(revset)
         if (!isSummary) throw StubError("Only --summary and --git diffs supported in stub")
         val change = resolveOne(revset)
-        val diffs = computeDiffs(change)
+        val diffs = computeDiffs(change, file)
         val output = diffs.sortedBy { it.first }.joinToString("") { (path, status) -> "$status $path\n" }
         return ok(output)
     }
@@ -164,13 +170,12 @@ class JjStub(override val workDir: Path) : JjBackend {
     private fun cmdDiffGit(revset: String): JjBackend.Result {
         val change = resolveOne(revset)
         val output = buildString {
-            val renamedPaths = change.renames.keys + change.renames.values
             for ((from, to) in change.renames.entries.sortedBy { it.key }) {
                 appendLine("diff --git a/$from b/$to")
                 appendLine("rename from $from")
                 appendLine("rename to $to")
             }
-            val diffs = computeDiffs(change).filter { it.first !in renamedPaths }
+            val diffs = computeDiffs(change).filter { it.second != 'R' }
             for ((path, _) in diffs.sortedBy { it.first }) {
                 appendLine("diff --git a/$path b/$path")
             }
@@ -353,7 +358,8 @@ class JjStub(override val workDir: Path) : JjBackend {
                     authorEmail = change.authorEmail,
                     timestamp = change.timestamp,
                     abandoned = change.abandoned,
-                    immutable = change.immutable
+                    immutable = change.immutable,
+                    hasPushedAncestor = change.hasPushedAncestor
                 )
                 changes[i] = replacement
                 if (workingCopyIndex == i) workingCopyIndex = i // stays the same index
@@ -559,6 +565,7 @@ class JjStub(override val workDir: Path) : JjBackend {
         field("false") // conflict
         field(if (isEmpty) "true" else "false")
         field(if (change.immutable) "true" else "false")
+        field(if (change.hasPushedAncestor) "true" else "false")
 
         if (isFullTemplate) {
             field(change.authorName)
@@ -640,14 +647,24 @@ class JjStub(override val workDir: Path) : JjBackend {
         }
     }
 
-    private fun computeDiffs(change: StubChange): List<Pair<String, Char>> {
+    private fun computeDiffs(change: StubChange, limitToPath: String? = null): List<Pair<String, Char>> {
         val parentFiles = getFilesAtChange(findParentOrNull(change))
+        val renamedPaths = change.renames.keys + change.renames.values
+        val result = mutableListOf<Pair<String, Char>>()
+
+        // Emit rename entries
+        for ((from, to) in change.renames) {
+            if (limitToPath != null && limitToPath != from && limitToPath != to) continue
+            result.add(formatRenamePath(from, to) to 'R')
+        }
+
         // For working copy, also check filesystem
-        return if (change === workingCopy) {
+        if (change === workingCopy) {
             val fsFiles = scanWorkDir()
-            val result = mutableListOf<Pair<String, Char>>()
             // Check explicit files in the change
             for ((path, content) in change.files) {
+                if (path in renamedPaths) continue
+                if (limitToPath?.let { path != it } == true) continue
                 if (content == null) {
                     if (path in parentFiles) result.add(path to 'D')
                 } else if (path in parentFiles) {
@@ -658,7 +675,7 @@ class JjStub(override val workDir: Path) : JjBackend {
             }
             // Check filesystem files not yet in change.files
             for ((path, content) in fsFiles) {
-                if (path in change.files) continue
+                if (path in change.files || path in renamedPaths) continue
                 val parentContent = parentFiles[path]
                 if (parentContent == null) {
                     result.add(path to 'A')
@@ -668,12 +685,12 @@ class JjStub(override val workDir: Path) : JjBackend {
             }
             // Check parent files deleted on filesystem
             for (path in parentFiles.keys) {
-                if (path in change.files) continue
+                if (path in change.files || path in renamedPaths) continue
                 if (path !in fsFiles) result.add(path to 'D')
             }
-            result
         } else {
-            change.files.mapNotNull { (path, content) ->
+            change.files.mapNotNullTo(result) { (path, content) ->
+                if (path in renamedPaths) return@mapNotNullTo null
                 if (content == null) {
                     if (path in parentFiles) path to 'D' else null
                 } else if (path in parentFiles) {
@@ -683,6 +700,21 @@ class JjStub(override val workDir: Path) : JjBackend {
                 }
             }
         }
+        return result
+    }
+
+    private fun formatRenamePath(from: String, to: String): String {
+        val fromParts = from.split("/")
+        val toParts = to.split("/")
+        val prefixLen = fromParts.zip(toParts).takeWhile { (a, b) -> a == b }.size
+        val suffixLen = fromParts.reversed().zip(toParts.reversed())
+            .drop(fromParts.size - prefixLen) // don't overlap with prefix
+            .takeWhile { (a, b) -> a == b }.size
+        val prefix = if (prefixLen > 0) fromParts.take(prefixLen).joinToString("/") + "/" else ""
+        val suffix = if (suffixLen > 0) "/" + fromParts.takeLast(suffixLen).joinToString("/") else ""
+        val fromMiddle = fromParts.drop(prefixLen).dropLast(suffixLen).joinToString("/")
+        val toMiddle = toParts.drop(prefixLen).dropLast(suffixLen).joinToString("/")
+        return "$prefix{$fromMiddle => $toMiddle}$suffix"
     }
 
     private fun getFileAtChange(change: StubChange, path: String): String? {
@@ -803,13 +835,15 @@ class JjStub(override val workDir: Path) : JjBackend {
     private fun newStubChange(
         description: String,
         parentIds: List<String>,
-        immutable: Boolean = false
+        immutable: Boolean = false,
+        hasPushedAncestor: Boolean = immutable
     ) = StubChange(
         changeId = nextChangeId(),
         commitId = nextCommitId(),
         description = description,
         parentIds = parentIds,
-        immutable = immutable
+        immutable = immutable,
+        hasPushedAncestor = hasPushedAncestor
     )
 
     private fun nextChangeId(): String {
@@ -840,6 +874,18 @@ class JjStub(override val workDir: Path) : JjBackend {
         return if (idx >= 0 && idx + 1 < size) this[idx + 1] else null
     }
 
+    private val List<String>.withoutFlags get() = buildList {
+        var i = 0
+        while (i < size) {
+            if (this@withoutFlags[i].startsWith("-")) {
+                i += 2 // skip flag and its value
+            } else {
+                add(this@withoutFlags[i])
+                i++
+            }
+        }
+    }
+
     private class StubError(message: String) : RuntimeException(message)
 }
 
@@ -855,5 +901,6 @@ private data class StubChange(
     val authorEmail: String = "test@example.com",
     val timestamp: Long = System.currentTimeMillis() / 1000,
     var abandoned: Boolean = false,
-    val immutable: Boolean = false
+    val immutable: Boolean = false,
+    val hasPushedAncestor: Boolean = false
 )

@@ -10,6 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - "Compare with commit" popup now shows bookmarks immediately when opened, instead of showing nothing until the entire log history loaded. Bookmarks load first (fast path), then recent changes are fetched in a second phase limited to 200 entries to avoid stalling on large repositories.
 
+## [0.6.8] - 2026-05-13
+
+### Fixed
+- "Open File in Remote" no longer causes IDE errors when hovering the context menu in large repos (eliminated synchronous jj subprocess call from action update)
+- Diff on a directory opens diff views on all changed files under that directory
+- Cmd+D (Show Diff) now works in working copy tool window regardless of which component has focus
+- Compare with Local, Compare Before with Local, and Restore to This now appear and work in historical file editors
+- Compare with Another Commit now appears in the changes tree context menu (details panel and working copy panel)
+- Restore to This registered in editor Jujutsu menu
+- Restore (working copy) correctly hidden in historical file editor context
+- Jujutsu editor submenu grouped with separators matching the commit details panel layout
+
+## [0.6.7] - 2026-05-12
+
+### Added
+- Jujutsu context menu available when viewing historical file versions
+- Show diff for historical change
+- Compare historical change with another commit
+- Custom history provider replaces built-in VCS history tabs
+
+### Fixed
+- Diffs, change lists, and annotation gutters now show the correct base content for merge commits, using the auto-merged parent tree instead of the first parent's content
+- Diffs work for files that have been renamed
+- Open in Remote finds last pushed revision
+- Restore Selection action no longer evaluates repository resolution unnecessarily when hidden in historical context
+
+### Changed
+- "Restore to This" now supports multiple file selections
+- Removed spurious opening of files from working copy window when selecting a file
+- Consolidated "Open File" and "Open Repository Version"
+- Split and squash actions consolidated for working copy and historical revisions
+- Open in Remote works for multiple files
+
 ## [0.6.6] - 2026-04-19
 
 ### Added
@@ -23,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clicking an annotation gutter column now correctly navigates the log to that change
 - Annotation "View Colors" now works — lines from the same change share a background colour, and "Color by Author" groups by author
 - Annotation "View Names" / "Email" modes now work correctly — name shortening (initials, first/last name, email) is applied when toggled
+- Annotation no longer shows a "line count mismatch" warning when the working copy has local changes; the annotation now targets `@-` (the parent), matching IntelliJ's line status tracker base
+- "Annotate Previous Revision" now loads file content correctly, including for files opened in historical annotation tabs
 
 ### Changed
 - Repository icon colours are now consistent with IDE folders
@@ -396,7 +431,9 @@ numerous improvements made during the 0.1.x development cycle.
 - Refactored log tab management
 - Change hashes from change IDs to commit IDs for platform compatibility
 
-[Unreleased]: https://github.com/kkkev/jj-idea/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/kkkev/jj-idea/compare/v0.6.8...HEAD
+[0.6.8]: https://github.com/kkkev/jj-idea/releases/tag/v0.6.8
+[0.6.7]: https://github.com/kkkev/jj-idea/releases/tag/v0.6.7
 [0.6.6]: https://github.com/kkkev/jj-idea/releases/tag/v0.6.6
 [0.6.5]: https://github.com/kkkev/jj-idea/releases/tag/v0.6.5
 [0.6.4]: https://github.com/kkkev/jj-idea/releases/tag/v0.6.4

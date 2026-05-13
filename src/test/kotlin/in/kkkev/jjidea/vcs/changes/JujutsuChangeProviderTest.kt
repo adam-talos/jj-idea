@@ -14,13 +14,15 @@ import com.intellij.openapi.vcs.actions.VcsContextFactory
 import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.changes.ChangelistBuilder
 import com.intellij.openapi.vcs.changes.ContentRevision
+import `in`.kkkev.jjidea.jj.ContentLocator
 import `in`.kkkev.jjidea.jj.JujutsuRepository
-import `in`.kkkev.jjidea.jj.Revision
 import `in`.kkkev.jjidea.vcs.JujutsuVcs
 import `in`.kkkev.jjidea.vcs.relativeTo
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
-import io.mockk.*
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -45,7 +47,7 @@ class JujutsuChangeProviderTest {
         application.registerService(VcsContextFactory::class.java, vcsContextFactory)
 
         every { repo.directory } returns directory
-        every { repo.workingCopyParent() } returns mockk<Revision>()
+        every { repo.workingCopy.parentContentLocator } returns mockk<ContentLocator>()
 
         val pathStringSlot = slot<String>()
         val isDirectorySlot = slot<Boolean>()
@@ -120,7 +122,7 @@ class JujutsuChangeProviderTest {
 
         val filePathSlot = slot<FilePath>()
         every {
-            repo.createRevision(capture(filePathSlot), any())
+            repo.createContentRevision(capture(filePathSlot), any<ContentLocator>())
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured
@@ -146,7 +148,7 @@ class JujutsuChangeProviderTest {
 
         val filePathSlot = slot<FilePath>()
         every {
-            repo.createRevision(capture(filePathSlot), any())
+            repo.createContentRevision(capture(filePathSlot), any<ContentLocator>())
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured
@@ -173,9 +175,9 @@ class JujutsuChangeProviderTest {
         } returns Unit
 
         val filePathSlot = slot<FilePath>()
-        val revisionSlot = slot<Revision>()
+        val contentLocatorSlot = slot<ContentLocator>()
         every {
-            repo.createRevision(capture(filePathSlot), capture(revisionSlot))
+            repo.createContentRevision(capture(filePathSlot), capture(contentLocatorSlot))
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured
@@ -203,9 +205,9 @@ class JujutsuChangeProviderTest {
         } returns Unit
 
         val filePathSlot = slot<FilePath>()
-        val revisionSlot = slot<Revision>()
+        val contentLocatorSlot = slot<ContentLocator>()
         every {
-            repo.createRevision(capture(filePathSlot), capture(revisionSlot))
+            repo.createContentRevision(capture(filePathSlot), capture(contentLocatorSlot))
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured
@@ -233,9 +235,9 @@ class JujutsuChangeProviderTest {
         } returns Unit
 
         val filePathSlot = slot<FilePath>()
-        val revisionSlot = slot<Revision>()
+        val contentLocatorSlot = slot<ContentLocator>()
         every {
-            repo.createRevision(capture(filePathSlot), capture(revisionSlot))
+            repo.createContentRevision(capture(filePathSlot), capture(contentLocatorSlot))
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured
@@ -315,9 +317,9 @@ class JujutsuChangeProviderTest {
         } returns Unit
 
         val filePathSlot = slot<FilePath>()
-        val revisionSlot = slot<Revision>()
+        val contentLocatorSlot = slot<ContentLocator>()
         every {
-            repo.createRevision(capture(filePathSlot), capture(revisionSlot))
+            repo.createContentRevision(capture(filePathSlot), capture(contentLocatorSlot))
         } answers {
             val result = mockk<ContentRevision>()
             every { result.file } returns filePathSlot.captured

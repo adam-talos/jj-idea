@@ -1,16 +1,26 @@
 package `in`.kkkev.jjidea.jj
 
+import com.intellij.diff.DiffContentFactory
+import com.intellij.diff.contents.DiffContent
+import com.intellij.diff.contents.EmptyContent
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.vcs.FilePath
+import com.intellij.openapi.vcs.VcsException
 import com.intellij.openapi.vcs.changes.ContentRevision
+import com.intellij.openapi.vcs.changes.CurrentContentRevision
+import com.intellij.openapi.vcs.history.VcsRevisionNumber
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.vcsUtil.VcsUtil
+import `in`.kkkev.jjidea.JujutsuBundle
+import `in`.kkkev.jjidea.actions.JujutsuDataKeys
+import `in`.kkkev.jjidea.actions.JujutsuDataKeys.DiffContentInfo
 import `in`.kkkev.jjidea.jj.cli.CliLogService
-import `in`.kkkev.jjidea.vcs.JujutsuRootChecker
-import `in`.kkkev.jjidea.vcs.changes.JujutsuRevisionNumber
-import `in`.kkkev.jjidea.vcs.pathRelativeTo
+import `in`.kkkev.jjidea.util.GitDiffReverseApplier
+import `in`.kkkev.jjidea.vcs.*
+import `in`.kkkev.jjidea.vcs.changes.ChangeIdRevisionNumber
+import `in`.kkkev.jjidea.vcs.changes.MergeParentRevisionNumber
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -27,19 +37,25 @@ interface JujutsuRepository {
 
     /** Git remotes for this repository, lazily fetched once per session. */
     val gitRemotes: List<GitRemote>
-    fun createRevision(filePath: FilePath, revision: Revision): ContentRevision
+
+    fun getLogEntry(revision: Revision): LogEntry
+    fun getLogEntry(contentLocator: ContentLocator): LogEntry?
+    fun getLogEntry(changeId: ChangeId) = getLogEntry(changeId as Revision)
+
+    val workingCopy: LogEntry
+
+    fun revisionNumberFor(filePath: FilePath): VcsRevisionNumber
+
+    fun createContentRevision(filePath: FilePath, contentLocator: ContentLocator): ContentRevision
+    fun createContentRevision(filePath: FilePath, logEntry: LogEntry): ContentRevision
+    fun createContentRevision(fileAtVersion: FileAtVersion): ContentRevision
+
+    fun createDiffSideFor(fileAtVersion: FileAtVersion?): DiffSide
+
+    fun getVirtualFile(fileAtVersion: FileAtVersion): VirtualFile
+
     fun getRelativePath(filePath: FilePath): String
     fun getRelativePath(file: VirtualFile): String
-
-    /**
-     * The revision to use as the working copy's parent for change/diff providers.
-     *
-     * Using the raw revset `@-` breaks when the working copy is a merge, because `@-` resolves
-     * to multiple commits and `jj file show -r @-` then fails. This resolves to the first parent's
-     * change id via the cached working copy entry in the state model. Falls back to `@-` only when
-     * the cache is not populated yet (harmless for non-merge working copies).
-     */
-    fun workingCopyParent(): Revision
 }
 
 data class JujutsuRepositoryImpl(
@@ -50,7 +66,7 @@ data class JujutsuRepositoryImpl(
     private val executor: CommandExecutor by lazy { project.commandExecutorFactory.create(directory) }
 
     /**
-     * Command executor for initialized repositories. Throws if repository is not initialized.
+     * Command executor for initialised repositories. Throws if repository is not initialised.
      */
     override val commandExecutor: CommandExecutor
         get() {
@@ -107,28 +123,144 @@ data class JujutsuRepositoryImpl(
 
     override fun getRelativePath(file: VirtualFile) = getRelativePath(VcsUtil.getFilePath(file))
 
-    override fun createRevision(filePath: FilePath, revision: Revision): ContentRevision =
-        JujutsuContentRevision(filePath, revision)
+    override fun revisionNumberFor(filePath: FilePath) = when (val parent = workingCopy.parentContentLocator) {
+        is MergeParentOf -> MergeParentRevisionNumber(parent.childRevision)
+        is ChangeId -> ChangeIdRevisionNumber(parent)
+        else -> throw VcsException("Cannot find revision number for $parent")
+    }
 
-    override fun workingCopyParent(): Revision =
-        project.stateModel.repositoryStates.value
-            .firstOrNull { it.repo == this }
-            ?.parentIds
-            ?.firstOrNull()
-            ?: WorkingCopy.parent
+    override fun createContentRevision(filePath: FilePath, contentLocator: ContentLocator): ContentRevision =
+        when (contentLocator) {
+            is WorkingCopy -> CurrentContentRevision(filePath)
+            is MergeParentOf -> MergeParentContentRevision(filePath, contentLocator)
+            is ChangeId -> ContentLogEntryImpl(filePath, contentLocator)
+            is ContentLocator.Empty -> EmptyContentRevisionImpl(filePath)
+        }
+
+    override fun createContentRevision(filePath: FilePath, logEntry: LogEntry): ContentRevision =
+        if (logEntry.isWorkingCopy) {
+            CurrentContentRevision(filePath)
+        } else {
+            ContentLogEntryImpl(filePath, logEntry.id)
+        }
+
+    override fun createContentRevision(fileAtVersion: FileAtVersion) =
+        createContentRevision(fileAtVersion.filePath, fileAtVersion.contentLocator)
+
+    override fun getLogEntry(revision: Revision) = logService.getLog(revision).getOrThrow().singleOrNull()
+        ?: throw VcsException("Multiple log entries found for revision $revision")
+
+    override fun getLogEntry(contentLocator: ContentLocator) = (contentLocator as? Revision)?.let(this::getLogEntry)
+
+    override val workingCopy: LogEntry
+        get() = project.stateModel.workingCopies.value[directory.path]
+            ?: throw VcsException("Working copy not found for $this")
+
+    override fun createDiffSideFor(fileAtVersion: FileAtVersion?): DiffSide =
+        DiffSideImpl(fileAtVersion?.let(this::getVirtualFile))
+
+    override fun getVirtualFile(fileAtVersion: FileAtVersion) = if (getLogEntry(
+            fileAtVersion.contentLocator
+        )?.isWorkingCopy ==
+        true
+    ) {
+        fileAtVersion.filePath.virtualFile ?: throw VcsException("Cannot find virtual file for $fileAtVersion")
+    } else {
+        JujutsuVirtualFile(fileAtVersion, this)
+    }
 
     /**
-     * Represents the content of a file at a specific jujutsu revision
+     * Represents the content of a file prior to a merge.
      */
-    private inner class JujutsuContentRevision(private val filePath: FilePath, private val revision: Revision) :
-        ContentRevision {
-        override fun getContent(): String? {
-            val result = commandExecutor.show(filePath, revision)
-            return result.stdout.takeIf { result.isSuccess }
+    private inner class MergeParentContentRevision(
+        private val filePath: FilePath,
+        private val mergeParentOf: MergeParentOf
+    ) : ContentRevision {
+        /**
+         * Reconstructs the auto-merged parent tree content by
+         * reverse-applying `jj diff --git -r <childRevision> -- <file>` to the file's content at
+         * [MergeParentOf.childRevision]. This is necessary because `jj file show -r <firstParent>`
+         * only returns the first parent's content, not the merge parent tree jj diffs against.
+         */
+        override fun getContent(): String {
+            val childRevision = mergeParentOf.childRevision
+            val afterContent = commandExecutor.show(filePath, childRevision).let {
+                if (it.isSuccess) it.stdout else ""
+            }
+            val diffResult = commandExecutor.diffGitFile(childRevision, filePath)
+            if (!diffResult.isSuccess || diffResult.stdout.isBlank()) return afterContent
+            return GitDiffReverseApplier.reverseApply(afterContent, diffResult.stdout) ?: afterContent
         }
 
         override fun getFile() = filePath
 
-        override fun getRevisionNumber() = JujutsuRevisionNumber(revision)
+        override fun getRevisionNumber() = MergeParentRevisionNumber(mergeParentOf.childRevision)
+    }
+
+    private inner class ContentLogEntryImpl(private val filePath: FilePath, private val changeId: ChangeId) :
+        ContentRevision {
+        override fun getFile() = filePath
+
+        override fun getRevisionNumber() = ChangeIdRevisionNumber(changeId)
+
+        override fun getContent(): String? {
+            val result = commandExecutor.show(filePath, changeId)
+            return result.stdout.takeIf { result.isSuccess }
+        }
+    }
+
+    private inner class DiffSideImpl(val file: VirtualFile?) : DiffSide {
+        init {
+            file?.cacheContents()
+        }
+
+        override val content = createDiffContentFor(file) ?: EmptyContent()
+
+        override val title
+            get() = file?.let { "${it.name} (${it.contentLocator.title})" }
+                ?: JujutsuBundle.message("diff.label.empty")
+
+        private fun createDiffContentFor(file: VirtualFile?): DiffContent? {
+            val logEntry = file?.let { project.possibleLogEntryFor(it) ?: workingCopy }
+            return when {
+                logEntry == null -> null
+                logEntry.isWorkingCopy -> {
+                    val contentFactory = DiffContentFactory.getInstance()
+                    if (file.exists()) {
+                        contentFactory.create(project, file)
+                    } else {
+                        contentFactory.createEmpty()
+                    }
+                }
+
+                else -> {
+                    val filePath = file.filePath
+                    createContentRevision(filePath, logEntry).content?.let { content ->
+                        DiffContentFactory.getInstance().create(project, content, filePath.fileType).apply {
+                            putUserData(
+                                JujutsuDataKeys.DIFF_CONTENT_INFO,
+                                DiffContentInfo(logEntry.repo, filePath, logEntry.commitId)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private class EmptyContentRevisionImpl(private val filePath: FilePath) : ContentRevision {
+        override fun getFile() = filePath
+        override fun getContent() = null
+        override fun getRevisionNumber() = dummyRevisionNumber(ContentLocator.Empty.title)
+    }
+}
+
+private fun dummyRevisionNumber(title: String) = object : VcsRevisionNumber {
+    override fun asString() = title
+    override fun toString() = title
+
+    override fun compareTo(other: VcsRevisionNumber?) = when {
+        other === this -> 0
+        else -> this.toString().compareTo(other.toString())
     }
 }
